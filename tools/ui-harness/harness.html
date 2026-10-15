@@ -68,6 +68,19 @@
         setTimeout(() => emit("BJLCaptured", { kind: "aerial", raceId, dataUrl: shot, center: [cx, cy], halfHeight: (Math.max(...ys) - Math.min(...ys)) * 0.65 }), 300);
       },
       requestRoads: () => emit("BJLRoads", { level: state.level, map: null }),
+      // ?relay=1 : the in-game path. Here the fake "Lua" makes the request the server plugin would.
+      http: async (id, method, path, body, contentType) => {
+        const headers = {};
+        if (state.account) headers.Authorization = `Bearer ${state.account.token}`;
+        if (body) headers["Content-Type"] = contentType || "application/json";
+        let status = 0, text = "";
+        try {
+          const res = await fetch(site + path, { method, headers, body: body || undefined });
+          status = res.status;
+          text = await res.text();
+        } catch (e) {}
+        emit("BJLHttpResult", { id, status, body: text });
+      },
       openUrl: (url) => console.log("openUrl", url),
       notify: (msg) => console.log("notify", msg),
     };
@@ -92,6 +105,8 @@
       }),
       emit,
     };
+    // The game's UI must go through the server plugin's relay; this page can fetch the site itself.
+    window.BJL_DIRECT_FETCH = !new URLSearchParams(location.search).get("relay");
     await import("/ui/modModules/bjlive/bjlive.js");
     angular.bootstrap(document, ["bjlive"]);
   </script>

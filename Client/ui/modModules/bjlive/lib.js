@@ -132,40 +132,75 @@ export class SiteError extends Error {
     }
 }
 
+/** JSON with every non-ASCII character escaped, so it can be cut into pieces anywhere. */
+export const asciiJson = (value) =>
+    JSON.stringify(value).replace(/[\u007f-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+
 /**
- * BeamJoy Web's game API. `getToken` is read on every call so linking and unlinking take
- * effect at once.
+ * Plain fetch, for a page allowed to connect to the site (the UI harness). The game's UI isn't:
+ * its Content Security Policy only allows localhost, so in game requests go through the relay.
  */
-export function createSite(getBase, getToken) {
-    const request = async (method, path, body, { timeout = 20000, raw = false, contentType } = {}) => {
-        const base = getBase();
-        if (!base) throw new SiteError("This server hasn't set up BeamJoy Live.", 0);
+export function fetchTransport(getBase, getToken) {
+    return async ({ method, path, body, contentType, timeout }) => {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), timeout);
         const headers = {};
         const token = getToken();
         if (token) headers.Authorization = `Bearer ${token}`;
         if (body !== undefined) headers["Content-Type"] = contentType || "application/json";
-        let res;
         try {
-            res = await fetch(base + path, {
-                method,
-                headers,
-                body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
-                signal: ctrl.signal,
-            });
+            const res = await fetch(getBase() + path, { method, headers, body, signal: ctrl.signal });
+            return { status: res.status, text: await res.text() };
         } catch (e) {
-            throw new SiteError(e.name === "AbortError" ? "The site didn't answer in time." : "Couldn't reach the site.", 0);
+            return { status: 0, text: JSON.stringify({ error: e.name === "AbortError" ? "The site didn't answer in time." : "Couldn't reach the site." }) };
         } finally {
             clearTimeout(timer);
         }
+    };
+}
+
+/**
+ * Through the server plugin (Server/BeamJoyLive/main.lua, "Web relay"): `send` hands the request
+ * to the game's Lua, which adds the player's token; `deliver` is called with each answer.
+ */
+export function relayTransport(send) {
+    const pending = new Map();
+    const transport = ({ method, path, body, contentType, timeout }) =>
+        new Promise((resolve) => {
+            let id;
+            do id = Math.floor(Math.random() * 1e9) + 1;
+            while (pending.has(id));
+            const timer = setTimeout(() => {
+                pending.delete(id);
+                resolve({ status: 0, text: JSON.stringify({ error: "The site didn't answer in time." }) });
+            }, timeout + 10000);
+            pending.set(id, (status, text) => {
+                clearTimeout(timer);
+                pending.delete(id);
+                resolve({ status, text });
+            });
+            send(id, method, path, body || "", contentType || "");
+        });
+    transport.deliver = ({ id, status, body }) => {
+        const done = pending.get(id);
+        if (done) done(Number(status) || 0, body || "");
+    };
+    return transport;
+}
+
+/** BeamJoy Web's game API, over a transport (see above). */
+export function createSite(getBase, transport) {
+    const request = async (method, path, body, { timeout = 20000 } = {}) => {
+        if (!getBase()) throw new SiteError("This server hasn't set up BeamJoy Live.", 0);
+        const res = await transport({ method, path, body: body === undefined ? undefined : asciiJson(body), timeout });
         let data = null;
         try {
-            data = await res.json();
+            data = JSON.parse(res.text);
         } catch (e) {
             data = null;
         }
-        if (!res.ok && !(data && data.status === "expired")) {
+        if (res.status === 0) throw new SiteError((data && data.error) || "Couldn't reach the site.", 0);
+        if ((res.status < 200 || res.status >= 300) && !(data && data.status === "expired")) {
             const fieldErrors = data && data.errors ? Object.values(data.errors).join(" ") : null;
             throw new SiteError(fieldErrors || (data && data.error) || `The site said ${res.status}.`, res.status, data);
         }
@@ -178,17 +213,14 @@ export function createSite(getBase, getToken) {
         unlink: () => request("DELETE", "/api/game/me"),
         match: (course) => request("POST", "/api/game/routes/match", course),
         upload: (body) => request("POST", "/api/game/routes", body, { timeout: 120000 }),
-        replaceAerial: (slug, body) => request("POST", `/api/game/routes/${encodeURIComponent(slug)}/aerial`, body, { timeout: 60000 }),
+        replaceAerial: (slug, body) =>
+            request("POST", `/api/game/routes/${encodeURIComponent(slug)}/aerial`, body, { timeout: 60000 }),
         lap: (body) => request("POST", "/api/game/laps", body),
         leaderboard: (slug, sort = "lap", size = 10) =>
             request("GET", `/api/routes/${encodeURIComponent(slug)}/leaderboard?sort=${sort}&size=${size}`),
         level: (level) => request("GET", `/api/game/levels/${encodeURIComponent(level)}`),
-        uploadRoads: async (level, map) =>
-            request("POST", `/api/game/levels/${encodeURIComponent(level)}/roads`, await gzip(JSON.stringify(map)), {
-                raw: true,
-                contentType: "application/gzip",
-                timeout: 120000,
-            }),
+        uploadRoads: (level, map) =>
+            request("POST", `/api/game/levels/${encodeURIComponent(level)}/roads`, map, { timeout: 120000 }),
         live: (body) => request("POST", "/api/game/live", body, { timeout: 8000 }),
     };
 }

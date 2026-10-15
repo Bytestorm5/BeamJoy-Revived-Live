@@ -1,9 +1,9 @@
 // BeamJoy Live : the in-game window (toggle with Shift+F4 by default).
 //
 // Loaded by the game's UI like BeamJoy's own module (ui/modModules/<name>/<name>.js, an Angular
-// module and a component of the same name). All web requests happen here : the game's UI can
-// fetch, its Lua can't. Lua (lua/ge/extensions/beamjoyLive) supplies the game's side : races,
-// laps, screenshots, the road map, the live player list.
+// module and a component of the same name). Web requests are built here and made by the server
+// plugin (the game's UI may only connect to localhost). Lua (lua/ge/extensions/beamjoyLive)
+// supplies the game's side : races, laps, screenshots, the road map, the live player list.
 
 const lib = await import("/ui/modModules/bjlive/lib.js");
 
@@ -38,10 +38,14 @@ bjlive.component("bjlive", {
         ctrl.link = null; // { userCode, verifyUrl, deviceCode, expiresAt, status, error }
         ctrl.notice = null;
 
-        const site = lib.createSite(
-            () => (ctrl.state && ctrl.state.config && ctrl.state.config.siteUrl) || "",
-            () => (ctrl.state && ctrl.state.account && ctrl.state.account.token) || null
-        );
+        const siteBase = () => (ctrl.state && ctrl.state.config && ctrl.state.config.siteUrl) || "";
+        // The game's UI may only connect to localhost, so requests go through the server plugin;
+        // a page that can reach the site itself (tools/ui-harness) sets BJL_DIRECT_FETCH.
+        const relay = lib.relayTransport((...args) => bjlLua.send("http", ...args));
+        const transport = window.BJL_DIRECT_FETCH
+            ? lib.fetchTransport(siteBase, () => (ctrl.state && ctrl.state.account && ctrl.state.account.token) || null)
+            : relay;
+        const site = lib.createSite(siteBase, transport);
         ctrl.site = site;
 
         ctrl.siteUrl = (path = "") => ((ctrl.state && ctrl.state.config && ctrl.state.config.siteUrl) || "") + path;
@@ -224,7 +228,8 @@ bjlive.component("bjlive", {
                     const bounds = lib.aerialBounds(c.center, c.halfHeight, img.width, img.height);
                     $scope.$applyAsync(() => (ctrl.form.aerial = { dataUrl: img.dataUrl, bounds }));
                 } else {
-                    const img = await lib.downscale(c.dataUrl, 1600, 0.85);
+                    // kept small : uploads travel through the server in BeamMP-sized pieces
+                    const img = await lib.downscale(c.dataUrl, 1280, 0.8);
                     $scope.$applyAsync(() => {
                         if (ctrl.form.images.length < MAX_IMAGES) ctrl.form.images.push(img.dataUrl);
                     });
@@ -415,6 +420,9 @@ bjlive.component("bjlive", {
                     break;
                 case "BJLLiveReport":
                     onLiveReport(payload);
+                    break;
+                case "BJLHttpResult":
+                    relay.deliver(payload || {});
                     break;
                 case "BJLToggle":
                     ctrl.toggle();

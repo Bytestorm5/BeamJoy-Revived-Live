@@ -33,7 +33,8 @@ Linked games are listed, and can be unlinked, on the site's **Game** page (`/acc
 
 ## Install (hosts)
 
-Needs BeamJoy-Revived. From a [release](https://github.com/Bytestorm5/BeamJoy-Revived-Live/releases)
+Needs BeamJoy-Revived, and `curl` on the server machine (built into Windows 10 and later and
+nearly every Linux): the plugin makes the site requests. From a [release](https://github.com/Bytestorm5/BeamJoy-Revived-Live/releases)
 (or `python3 tools/build.py`, which writes `dist/`):
 
 | File | Goes to |
@@ -57,30 +58,40 @@ Changes take effect on the next server restart.
 ## How it fits together
 
 ```
-Server/BeamJoyLive/main.lua        BeamMP plugin: settings, picks the live reporter
+Server/BeamJoyLive/main.lua        BeamMP plugin: settings, picks the live reporter, web relay
 Client/                            -> BeamJoyLive.zip
   scripts/beamjoy_live/            loads the extension
   lua/ge/extensions/beamjoyLive/
-    main.lua                       bridge to the window and the server plugin, BeamJoy's races
+    main.lua                       bridge to the window and the server plugin, BeamJoy's races,
+                                   the relay's client side
     laps.lua                       your laps from BeamJoy's race updates
     capture.lua                    screenshots, the aerial camera, the road network
     live.lua                       the live player list (reporter only)
-  ui/modModules/bjlive/            the window (AngularJS, like BeamJoy's UI); all web requests
+  ui/modModules/bjlive/            the window (AngularJS, like BeamJoy's UI); builds the requests
 ```
 
-The game's Lua can't make web requests, so the window does (`fetch` from the game's UI, with the
-token as a bearer header); Lua supplies the game's side through `guihooks` events. The site's game
-API is under `/api/game/*` (see BeamJoy Web's `src/app/api/game`).
+Neither side of the game can reach the site itself: the game's UI has a Content Security Policy
+that only allows localhost, and its Lua has no HTTPS. So the window builds each request, the
+game's Lua adds the player's token and sends it to the server plugin in BeamMP events, and the
+plugin runs `curl` in the background (temp files under `Resources/Server/BeamJoyLive/tmp/`) and
+sends the answer back the same way. Only the site's `/api/` paths are relayed. This means a
+player's token passes through the server they're playing on; it can only post laps, uploads and
+live data as them, and they can unlink it on the site at any time.
+
+The site's game API is under `/api/game/*` (see BeamJoy Web's `src/app/api/game`).
 
 ## Developing
 
 - `python3 tools/lua_tests.py` runs the Lua against fakes of the game's and BeamMP's APIs
   (needs `pip install lupa`): lap detection, base64, road extraction, the live snapshot, the
-  server plugin's reporter election, plus a syntax check of every file.
+  server plugin's reporter election, plus a syntax check of every file. With
+  `BJL_SITE=http://localhost:3000` it also runs the web relay end to end: the client's Lua, the
+  plugin and real `curl` against a running site.
 - `tools/ui-harness` runs the window in a normal browser with the game's Lua faked:
   `cd tools/ui-harness && npm install && npm start`, then open
   `http://localhost:4100/?site=http://localhost:3000` against a local BeamJoy Web (`npm run dev`
   with `AUTH_DEV_LOGIN=true`). Buttons at the bottom fake Shift+F4, a finished lap and a live report.
+  Add `&relay=1` to send requests the in-game way (through the "Lua" bridge) instead of fetching.
 
 ### Not yet tried in the game
 
@@ -93,5 +104,5 @@ These game calls are the ones to check first in a live session:
   sideways, it's horizontal: swap the axes in `lib.js` `aerialBounds`.
 - `openWebBrowser(url)` to open the link page (falls back to copying the URL; the code can always
   be typed at `<site>/link`).
-- The game creating `<bjlive>` for the UI module, as it does `<beamjoy>` for BeamJoy's (the module
-  mounts itself after 3 s if not).
+- The relay on a **Windows** server: the plugin starts each request with
+  `start "" /b cmd /c ""<request>.cmd""` (Linux is tested, with curl, by `tools/lua_tests.py`).

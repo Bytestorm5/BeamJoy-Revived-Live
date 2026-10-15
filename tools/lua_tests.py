@@ -4,6 +4,7 @@ Needs Python 3 and lupa (pip install lupa), which bundles LuaJIT (the game's VM)
 (close to the BeamMP server's).
 
     python3 tools/lua_tests.py
+    BJL_SITE=http://localhost:3000 python3 tools/lua_tests.py   # also the web relay, with curl
 """
 import base64
 import json
@@ -165,6 +166,7 @@ def server():
             Settings = { Name = 1 },
             Get = function() return "^lMy ^4Server" end,
             RegisterEvent = function(e, fn) events[e] = fn end,
+            CreateEventTimer = function() end,
             TriggerClientEvent = function(pid, e, data) table.insert(toClient, { pid = pid, event = e, data = data }) end,
             IsPlayerConnected = function(pid) return connected[pid] == true end,
             GetPlayerName = function(pid) return "P" .. pid end,
@@ -205,6 +207,87 @@ def server():
     os.rmdir(tmp)
 
 
+def relay(site):
+    """The web relay end to end: the client's Lua, the server plugin, real curl, a real site."""
+    client = luajit21.LuaRuntime(unpack_returned_tuples=True)
+    server = lua54.LuaRuntime(unpack_returned_tuples=True)
+    tmp = os.path.join(ROOT, "tools", ".tmp-relay")
+    os.makedirs(tmp, exist_ok=True)
+    json.dump({"SiteUrl": site, "ServerKey": "srv_relaytest"}, open(os.path.join(tmp, "config.json"), "w"))
+    wire = []  # every event text, both ways
+
+    def to_server(event, data):
+        wire.append(data)
+        server.globals()["BJL_onHttp" if event == "BJLHttp" else "BJL_onHttpPart"](1, data)
+
+    def to_client(pid, event, data):
+        wire.append(data)
+        if event == "BJLHttpResult":
+            main.onHttpResult(data)
+        elif event == "BJLHttpPart":
+            main.onHttpPart(data)
+
+    ui = []
+    client.globals().TriggerServerEvent = to_server
+    client.globals().json_encode = lambda t: json.dumps(lua_to_py(t))
+    client.globals().json_decode = lambda t: py_to_lua(client, json.loads(t))
+    client.globals().ui_event = lambda name, payload: ui.append({"event": name, "payload": lua_to_py(payload)})
+    client.execute("""
+        jsonEncode, jsonDecode = json_encode, json_decode
+        guihooks = { trigger = function(_, data) ui_event(data.event, data.payload) end }
+    """)
+    main = load_ext(client, "main")
+    main.config = client.table_from({"siteUrl": site})
+
+    server.globals().json_encode = lambda t: json.dumps(lua_to_py(t))
+    server.globals().json_decode = lambda t: py_to_lua(server, json.loads(t))
+    server.globals().to_client = to_client
+    server.execute("""
+        MP = {
+            Settings = { Name = 1 }, Get = function() return "Relay test" end,
+            RegisterEvent = function() end, CreateEventTimer = function() end,
+            TriggerClientEvent = function(pid, e, data) to_client(pid, e, data) end,
+            IsPlayerConnected = function() return true end, GetPlayerName = function() return "P1" end,
+        }
+        Util = { JsonEncode = json_encode, JsonDecode = json_decode }
+    """)
+    src = open(os.path.join(ROOT, "Server/BeamJoyLive/main.lua"), encoding="utf-8").read()
+    src = src.replace('local PLUGIN_DIR = debug.getinfo(1, "S").source:gsub("^@", ""):gsub("\\\\", "/"):match("(.*/)") or "./"',
+                      f'local PLUGIN_DIR = "{tmp}/"')
+    server.execute(src)
+    server.execute("onInit()")
+
+    import time
+
+    def call(method, path, body="", token=None):
+        main.account = client.table_from({"token": token}) if token else None
+        rid = random.randint(1, 10**9)
+        main.http(rid, method, path, body, "application/json" if body else "")
+        for _ in range(300):
+            for msg in ui:
+                if msg["event"] == "BJLHttpResult" and msg["payload"]["id"] == rid:
+                    return msg["payload"]
+            server.globals().BJL_pollHttp()
+            time.sleep(0.05)
+        return None
+
+    got = call("GET", "/api/routes/highway-endurance/leaderboard?size=2")
+    check("relay: GET through curl", got and got["status"] == 200 and "entries" in json.loads(got["body"]), got and got["status"])
+    gates = [[1000 + i * 3.5, -2000 + (i % 7) * 1.25, 100.5] for i in range(1800)]
+    body = json.dumps({"level": "west_coast_usa", "loopable": False, "mapName": "Zpeed Zone", "gates": gates})
+    got = call("POST", "/api/game/routes/match", body)
+    check(f"relay: POST in {len(body) // 12000 + 1} parts", got and got["status"] == 200 and json.loads(got["body"]) == {"route": None}, got)
+    got = call("GET", "/api/game/me", token="bjl_not-a-real-token")
+    check("relay: token carried (site says 401)", got and got["status"] == 401, got and got["status"])
+    for path in ["/../etc/passwd", "https://evil.example/x", "/api/x\"y"]:
+        got = call("GET", path)
+        check(f"relay: refuses {path}", got and got["status"] == 0, got)
+    check("relay: no event holds a capital Z", all("Z" not in w for w in wire))
+    check("relay: temp files cleaned", sorted(os.listdir(os.path.join(tmp, "tmp"))) == [".keep"], os.listdir(os.path.join(tmp, "tmp")))
+    import shutil
+    shutil.rmtree(tmp)
+
+
 def lua_to_py(v):
     if hasattr(v, "items"):
         d = dict(v.items())
@@ -227,5 +310,9 @@ laps()
 capture()
 live()
 server()
+if os.environ.get("BJL_SITE"):
+    relay(os.environ["BJL_SITE"])
+else:
+    print("skip relay test (set BJL_SITE to a running BeamJoy Web, e.g. http://localhost:3000)")
 print("\n" + ("all passed" if not failures else f"{failures} failed"))
 sys.exit(1 if failures else 0)
