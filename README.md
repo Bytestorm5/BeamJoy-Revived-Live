@@ -13,8 +13,10 @@ and reads BeamJoy's race list.
   lap). The site's leaderboard page updates live. Grid races and freeroam runs both count.
 - **Map backgrounds.** The first linked player to load a level uploads its road network (the
   game's own navigation graph), and the site draws it under every route on that map. Uploads can
-  also carry an **aerial**: the camera flies straight above the race and takes a top-down shot,
-  which the site lays the route over.
+  also carry an **aerial**: the camera flies over the race looking straight down, with the level's
+  view distance raised and clouds and fog off, and the site lays the route over the picture. The
+  camera stays low enough for roads to be drawn (about 900 m at most), so a big race is shot in
+  overlapping pieces that the window stitches together; `beamng.log` says how many.
 - **Live sessions** (off unless the host turns it on). One linked player's game sends where
   everyone is, in what and how fast, every 5 seconds; the site shows it on its Live page.
 
@@ -102,6 +104,8 @@ These game calls are the ones to check first in a live session:
   `/screenshots/` with `FS:findFiles`.
 - The aerial's framing assumes the free camera's FOV is vertical. If aerials come out stretched
   sideways, it's horizontal: swap the axes in `lib.js` `aerialBounds`.
+- Raising the view distance for aerials (`theLevelInfo.visibleDistance` + `postApply`) and hiding
+  `CloudLayer` / `BasicClouds`. If the raise doesn't take, the aerial still works, in more shots.
 - `openWebBrowser(url)` to open the link page (falls back to copying the URL; the code can always
   be typed at `<site>/link`).
 - The relay on a **Windows** server: the plugin starts each request with

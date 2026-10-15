@@ -87,6 +87,37 @@ export function aerialBounds(center, halfHeight, width, height) {
     return [center[0] - halfWidth, center[1] - halfHeight, center[0] + halfWidth, center[1] + halfHeight];
 }
 
+/**
+ * Stitches aerial shots into one picture of `area` ([minX, minY, maxX, maxY], world metres),
+ * each laid where its own box falls. Shots arrive one at a time; `add` queues them in order.
+ */
+export function createMosaic(area, maxPx = 2048) {
+    const [minX, minY, maxX, maxY] = area;
+    const scale = maxPx / Math.max(maxX - minX, maxY - minY);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round((maxX - minX) * scale));
+    canvas.height = Math.max(1, Math.round((maxY - minY) * scale));
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#3b4048";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    let queue = Promise.resolve();
+    return {
+        canvas,
+        add(dataUrl, center, halfHeight) {
+            queue = queue.then(async () => {
+                const img = await loadImage(dataUrl);
+                const [x0, y0, x1, y1] = aerialBounds(center, halfHeight, img.naturalWidth, img.naturalHeight);
+                ctx.drawImage(img, (x0 - minX) * scale, (maxY - y1) * scale, (x1 - x0) * scale, (y1 - y0) * scale);
+            });
+            return queue;
+        },
+        async finish(quality = 0.8) {
+            await queue;
+            return canvas.toDataURL("image/jpeg", quality);
+        },
+    };
+}
+
 // --- formatting ------------------------------------------------------------------------------
 
 export function formatLap(ms) {

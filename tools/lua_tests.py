@@ -8,6 +8,7 @@ Needs Python 3 and lupa (pip install lupa), which bundles LuaJIT (the game's VM)
 """
 import base64
 import json
+import math
 import os
 import random
 import sys
@@ -288,6 +289,40 @@ def relay(site):
     shutil.rmtree(tmp)
 
 
+def aerial():
+    rt = luajit21.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute("beamjoyLive_main = { log = function() end }")
+    m = load_ext(rt, "capture")
+
+    def plan(w, h, ceiling):
+        p = m.planAerial(rt.table_from({"minX": 0, "maxX": w, "minY": 0, "maxY": h}), ceiling)
+        centers = [tuple(c.values()) for c in p.centers.values()]
+        return p, centers
+
+    def covers(p, centers, aspect):
+        area = list(p.area.values())
+        hw, hh = p.halfHeight * aspect, p.halfHeight
+        # every point of the area on a 50 x 50 grid lies in some shot
+        for i in range(51):
+            for j in range(51):
+                x = area[0] + (area[2] - area[0]) * i / 50
+                y = area[1] + (area[3] - area[1]) * j / 50
+                if not any(abs(x - cx) <= hw + 1e-6 and abs(y - cy) <= hh + 1e-6 for cx, cy in centers):
+                    return False
+        return True
+
+    p, c = plan(300, 200, 900)
+    check("aerial: a small race is one shot", len(c) == 1 and p.altitude <= 900, (len(c), p.altitude))
+    p, c = plan(4000, 3000, 900)
+    check("aerial: a big race stays under the ceiling", p.altitude <= 900 + 1e-6 and len(c) > 1, (len(c), p.altitude))
+    check("aerial: shots cover the area on 4:3", covers(p, c, 4 / 3))
+    check("aerial: and on 16:9", covers(p, c, 16 / 9))
+    p, c = plan(30000, 30000, 600)
+    check("aerial: a huge race is capped in shots, from higher up", len(c) <= 36 and p.altitude > 600 and covers(p, c, 4 / 3), (len(c), p.altitude))
+    check("aerial: ceiling from a short view distance", abs(m.ceilingFor(1000, 60) - 1000 * 0.8 / (1 + math.tan(math.pi / 6) ** 2 * (1 + (16 / 9) ** 2)) ** 0.5) < 0.01, m.ceilingFor(1000, 60))
+    check("aerial: ceiling capped for detail", m.ceilingFor(20000, 60) == 900)
+
+
 def lua_to_py(v):
     if hasattr(v, "items"):
         d = dict(v.items())
@@ -310,6 +345,7 @@ laps()
 capture()
 live()
 server()
+aerial()
 if os.environ.get("BJL_SITE"):
     relay(os.environ["BJL_SITE"])
 else:

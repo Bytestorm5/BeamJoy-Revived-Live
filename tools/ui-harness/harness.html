@@ -62,10 +62,16 @@
       },
       requestRace: (id) => emit("BJLRace", { id, race, course: course() }),
       captureScreenshot: () => setTimeout(() => emit("BJLCaptured", { kind: "screenshot", dataUrl: shot }), 300),
+      // like capture.lua : a 2 x 2 grid of shots over the race, then "aerial" when done
       captureAerial: (raceId) => {
         const xs = race.gates.map((g) => g.pos.x), ys = race.gates.map((g) => g.pos.y);
-        const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-        setTimeout(() => emit("BJLCaptured", { kind: "aerial", raceId, dataUrl: shot, center: [cx, cy], halfHeight: (Math.max(...ys) - Math.min(...ys)) * 0.65 }), 300);
+        const area = [Math.min(...xs) - 100, Math.min(...ys) - 100, Math.max(...xs) + 100, Math.max(...ys) + 100];
+        const halfHeight = (area[3] - area[1]) / 4 + 20;
+        const centers = [[0.25, 0.75], [0.75, 0.75], [0.25, 0.25], [0.75, 0.25]].map(([fx, fy]) =>
+          [area[0] + (area[2] - area[0]) * fx, area[1] + (area[3] - area[1]) * fy]);
+        centers.forEach((center, i) => setTimeout(() => emit("BJLCaptured",
+          { kind: "aerialTile", raceId, index: i + 1, count: 4, area, dataUrl: shot, center, halfHeight }), 200 * (i + 1)));
+        setTimeout(() => emit("BJLCaptured", { kind: "aerial", raceId, done: true, area }), 1200);
       },
       requestRoads: () => emit("BJLRoads", { level: state.level, map: null }),
       // ?relay=1 : the in-game path. Here the fake "Lua" makes the request the server plugin would.

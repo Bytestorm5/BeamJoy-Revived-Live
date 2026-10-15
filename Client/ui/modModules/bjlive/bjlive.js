@@ -217,16 +217,28 @@ bjlive.component("bjlive", {
             // the window hides itself, then Lua takes the picture
             $timeout(() => bjlLua.send(kind === "aerial" ? "captureAerial" : "captureScreenshot", ctrl.form.raceId), 150);
         };
+        // An aerial arrives as shots ("aerialTile", one per part of the race's area), then "aerial"
+        // when the camera is back : the shots are stitched as they come.
+        let mosaic = null;
         const onCaptured = async (c) => {
+            if (c.kind === "aerialTile") {
+                if (!mosaic || mosaic.raceId !== c.raceId) mosaic = { raceId: c.raceId, ...lib.createMosaic(c.area) };
+                mosaic.add(c.dataUrl, c.center, c.halfHeight).catch(() => {});
+                if (ctrl.form) ctrl.form.aerialProgress = `${c.index}/${c.count}`;
+                return;
+            }
             ctrl.hiddenForCapture = false;
+            const shots = mosaic;
+            mosaic = null;
             if (!ctrl.form) return;
             ctrl.form.capturing = null;
+            ctrl.form.aerialProgress = null;
             if (c.error) return flash(c.error, "error");
             try {
                 if (c.kind === "aerial") {
-                    const img = await lib.downscale(c.dataUrl, 2048, 0.8);
-                    const bounds = lib.aerialBounds(c.center, c.halfHeight, img.width, img.height);
-                    $scope.$applyAsync(() => (ctrl.form.aerial = { dataUrl: img.dataUrl, bounds }));
+                    if (!shots || shots.raceId !== c.raceId) throw new Error("No aerial shots came through.");
+                    const dataUrl = await shots.finish(0.8);
+                    $scope.$applyAsync(() => (ctrl.form.aerial = { dataUrl, bounds: c.area }));
                 } else {
                     // kept small : uploads travel through the server in BeamMP-sized pieces
                     const img = await lib.downscale(c.dataUrl, 1280, 0.8);
