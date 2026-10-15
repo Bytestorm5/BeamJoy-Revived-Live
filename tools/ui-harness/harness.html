@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BeamJoy Live harness</title>
+  <style>
+    body { margin: 0; min-height: 100vh; background: #3a4a3a linear-gradient(160deg, #5a6d58, #2b3530); font-family: system-ui, sans-serif; }
+    #fake { position: fixed; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px; max-width: 60vw; }
+    #fake button { font: 12px system-ui; padding: 6px 8px; }
+  </style>
+  <script src="/angular.js"></script>
+</head>
+<body>
+  <!-- The game's UI creates this element for the module. -->
+  <bjlive></bjlive>
+  <div id="fake">
+    <button onclick="fake.toggle()">Shift+F4</button>
+    <button onclick="fake.lap()">Finish a lap</button>
+    <button onclick="fake.live()">Live report</button>
+  </div>
+  <script type="module">
+    // A stand-in for the game's Lua: answers beamjoyLive_main.dispatch(...) calls the way
+    // lua/ge/extensions/beamjoyLive/main.lua does, with a race from fixtures/race.json.
+    const site = new URLSearchParams(location.search).get("site") || "http://localhost:3000";
+    const raceFile = new URLSearchParams(location.search).get("race") || "race.json";
+    const race = await (await fetch(`/fixtures/${raceFile}`)).json();
+    const shot = await (await fetch("/fixtures/shot.txt")).text().catch(() => "");
+    const state = {
+      version: "harness",
+      config: { siteUrl: site, leaderboards: true, uploads: true, liveSessions: true, serverName: "Harness Server" },
+      account: JSON.parse(localStorage.getItem("harness.account") || "null"),
+      level: race.level || "west_coast_usa",
+      levelTitle: "West Coast, USA",
+      selfName: "HarnessDriver",
+      reporter: true,
+      beamjoy: true,
+    };
+    const course = () => ({
+      raceId: 1, name: race.name, level: state.level, mapName: state.levelTitle, loopable: !!race.loopable,
+      gates: race.gates.map((g) => [g.pos.x, g.pos.y, g.pos.z]),
+    });
+    const emit = (event, payload) => {
+      const $root = angular.element(document.body).injector().get("$rootScope");
+      $root.$broadcast("BJLEvent", { event, payload });
+    };
+    window.calls = [];
+    const handlers = {
+      ready: () => {
+        emit("BJLState", state);
+        emit("BJLRaces", [{ id: 1, name: race.name, loopable: !!race.loopable, gates: race.gates.length, props: 0 }]);
+      },
+      saveAccount: (token, user) => {
+        state.account = { token, user };
+        localStorage.setItem("harness.account", JSON.stringify(state.account));
+        emit("BJLState", state);
+      },
+      clearAccount: () => {
+        state.account = null;
+        localStorage.removeItem("harness.account");
+        emit("BJLState", state);
+      },
+      requestRace: (id) => emit("BJLRace", { id, race, course: course() }),
+      captureScreenshot: () => setTimeout(() => emit("BJLCaptured", { kind: "screenshot", dataUrl: shot }), 300),
+      captureAerial: (raceId) => {
+        const xs = race.gates.map((g) => g.pos.x), ys = race.gates.map((g) => g.pos.y);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+        setTimeout(() => emit("BJLCaptured", { kind: "aerial", raceId, dataUrl: shot, center: [cx, cy], halfHeight: (Math.max(...ys) - Math.min(...ys)) * 0.65 }), 300);
+      },
+      requestRoads: () => emit("BJLRoads", { level: state.level, map: null }),
+      openUrl: (url) => console.log("openUrl", url),
+      notify: (msg) => console.log("notify", msg),
+    };
+    window.bngApi = {
+      serializeToLua: (v) => JSON.stringify(v ?? null),
+      engineLua: (cmd) => {
+        const m = /^beamjoyLive_main\.dispatch\((.*?), (.*)\)$/s.exec(cmd);
+        if (!m) return;
+        const event = JSON.parse(m[1]);
+        const args = JSON.parse(m[2]) || [];
+        window.calls.push([event, ...args]);
+        (handlers[event] || (() => {}))(...args);
+      },
+    };
+    window.fake = {
+      toggle: () => emit("BJLToggle", {}),
+      lap: (lapMs = 299000 + Math.round(Math.random() * 20000), sectors) =>
+        emit("BJLLap", { course: course(), lapMs, sectors: sectors ?? null, vehicle: "Hirochi SBR4", playerName: state.selfName, kind: "grid" }),
+      live: () => emit("BJLLiveReport", {
+        serverKey: "srv_harness_key_0123456789", serverName: state.config.serverName, level: state.level, mapName: state.levelTitle,
+        players: [{ name: "HarnessDriver", vehicle: "Hirochi SBR4", pos: [race.gates[0].pos.x, race.gates[0].pos.y, 0], heading: 45, speed: 30, activity: "", spectating: false }],
+      }),
+      emit,
+    };
+    await import("/ui/modModules/bjlive/bjlive.js");
+    angular.bootstrap(document, ["bjlive"]);
+  </script>
+</body>
+</html>

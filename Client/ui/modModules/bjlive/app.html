@@ -1,0 +1,531 @@
+<style>
+    bjlive {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 0;
+        height: 0;
+        z-index: 2;
+    }
+    .bjl-window {
+        position: fixed;
+        width: 26rem;
+        max-width: calc(100vw - 2rem);
+        display: flex;
+        flex-direction: column;
+        pointer-events: all;
+        color: #f2f2f2;
+        font-family: inherit;
+        font-size: 14px;
+        background: rgba(18, 20, 24, 0.94);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+        overflow: hidden;
+    }
+    .bjl-head {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.6rem 0.75rem;
+        cursor: move;
+        user-select: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .bjl-title {
+        flex: 1;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: rgb(255, 122, 26);
+    }
+    .bjl-tabs {
+        display: flex;
+        gap: 0.25rem;
+        padding: 0.5rem 0.75rem 0;
+    }
+    .bjl-tab {
+        flex: 1;
+        padding: 0.4rem 0.25rem;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        background: none;
+        color: #a9b0ba;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .bjl-tab.on {
+        color: #fff;
+        border-bottom-color: rgb(255, 122, 26);
+    }
+    .bjl-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        padding: 0.75rem;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    .bjl-muted {
+        color: #a9b0ba;
+    }
+    .bjl-small {
+        font-size: 12px;
+    }
+    .bjl-row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+    .bjl-grow {
+        flex: 1;
+        min-width: 0;
+    }
+    .bjl-btn {
+        padding: 0.45rem 0.8rem;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.06);
+        color: #f2f2f2;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .bjl-btn:hover {
+        background: rgba(255, 255, 255, 0.12);
+    }
+    .bjl-btn:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+    .bjl-btn.primary {
+        background: rgb(255, 122, 26);
+        border-color: rgb(255, 122, 26);
+        color: #1c0c00;
+    }
+    .bjl-btn.primary:hover {
+        background: rgb(255, 143, 61);
+    }
+    .bjl-btn.ghost {
+        border-color: transparent;
+        background: none;
+    }
+    .bjl-btn.danger {
+        color: #ff7b7b;
+    }
+    .bjl-x {
+        width: 1.8rem;
+        height: 1.8rem;
+        padding: 0;
+    }
+    .bjl-code {
+        font-family: monospace;
+        font-size: 30px;
+        letter-spacing: 0.15em;
+        text-align: center;
+        padding: 0.6rem;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.06);
+    }
+    .bjl-field label {
+        display: block;
+        margin-bottom: 0.25rem;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #c0c8d2;
+    }
+    .bjl-field input,
+    .bjl-field textarea,
+    .bjl-field select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.45rem 0.55rem;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(0, 0, 0, 0.35);
+        color: #f2f2f2;
+        font: inherit;
+    }
+    .bjl-field select option {
+        background: #1b2027;
+    }
+    .bjl-field textarea {
+        min-height: 4.5rem;
+        resize: vertical;
+    }
+    .bjl-error {
+        color: #ff7b7b;
+        font-size: 12px;
+        margin-top: 0.2rem;
+    }
+    .bjl-list {
+        display: flex;
+        flex-direction: column;
+        max-height: 14rem;
+        overflow-y: auto;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+    }
+    .bjl-item {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding: 0.5rem 0.6rem;
+        border: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        background: none;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+    }
+    .bjl-item:last-child {
+        border-bottom: 0;
+    }
+    .bjl-item:hover {
+        background: rgba(255, 255, 255, 0.06);
+    }
+    .bjl-truncate {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .bjl-thumbs {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.35rem;
+    }
+    .bjl-thumb {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        border-radius: 5px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.06);
+    }
+    .bjl-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+    }
+    .bjl-thumb button {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        width: 1.3rem;
+        height: 1.3rem;
+        border: 0;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.7);
+        color: #fff;
+        cursor: pointer;
+        line-height: 1;
+    }
+    .bjl-card {
+        padding: 0.6rem;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
+    }
+    .bjl-notice {
+        padding: 0.5rem 0.75rem;
+        font-size: 13px;
+        background: rgba(44, 200, 181, 0.15);
+    }
+    .bjl-notice.error {
+        background: rgba(255, 107, 107, 0.18);
+    }
+    .bjl-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-variant-numeric: tabular-nums;
+    }
+    .bjl-table td {
+        padding: 0.3rem 0.2rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .bjl-table .num {
+        text-align: right;
+        font-family: monospace;
+    }
+    .bjl-table .me td {
+        color: rgb(255, 160, 90);
+    }
+    .bjl-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #6b7380;
+    }
+    .bjl-dot.on {
+        background: #2cc8b5;
+    }
+</style>
+
+<div
+    class="bjl-window"
+    ng-if="$ctrl.open && !$ctrl.hiddenForCapture"
+    ng-style="{ left: $ctrl.pos.x + 'px', top: $ctrl.pos.y + 'px', 'max-height': 'calc(100vh - ' + ($ctrl.pos.y + 16) + 'px)' }"
+    role="dialog"
+    aria-label="BeamJoy Live"
+>
+    <div class="bjl-head" ng-mousedown="$ctrl.startDrag($event)">
+        <span class="bjl-title">BeamJoy Live</span>
+        <span class="bjl-small bjl-muted bjl-truncate" ng-if="$ctrl.me">{{$ctrl.me.name}}</span>
+        <button class="bjl-btn ghost bjl-x" ng-click="$ctrl.toggle(false)" aria-label="Close">✕</button>
+    </div>
+
+    <div class="bjl-notice" ng-if="$ctrl.notice" ng-class="$ctrl.notice.kind">{{$ctrl.notice.text}}</div>
+
+    <div class="bjl-body" ng-if="!$ctrl.configured()">
+        <p class="bjl-muted">
+            This server hasn't set up BeamJoy Live. The host sets <b>SiteUrl</b> in
+            Resources/Server/BeamJoyLive/config.json.
+        </p>
+    </div>
+
+    <div class="bjl-tabs" ng-if="$ctrl.configured()">
+        <button class="bjl-tab" ng-class="{on: $ctrl.tab === 'account'}" ng-click="$ctrl.tab = 'account'">Account</button>
+        <button class="bjl-tab" ng-class="{on: $ctrl.tab === 'upload'}" ng-click="$ctrl.tab = 'upload'">Upload</button>
+        <button class="bjl-tab" ng-class="{on: $ctrl.tab === 'times'}" ng-click="$ctrl.tab = 'times'">Times</button>
+        <button class="bjl-tab" ng-class="{on: $ctrl.tab === 'live'}" ng-click="$ctrl.tab = 'live'">Live</button>
+    </div>
+
+    <!-- ACCOUNT -->
+    <div class="bjl-body" ng-if="$ctrl.configured() && $ctrl.tab === 'account'">
+        <div ng-if="$ctrl.linked()" class="bjl-card">
+            <div class="bjl-row">
+                <span class="bjl-grow">
+                    Linked to <b>{{($ctrl.me || $ctrl.state.account.user).name || 'your account'}}</b>
+                </span>
+                <button class="bjl-btn ghost" ng-click="$ctrl.openUrl($ctrl.siteUrl('/u/' + ($ctrl.me || $ctrl.state.account.user).slug))">
+                    Profile ↗
+                </button>
+            </div>
+            <p class="bjl-small bjl-muted">Uploads and lap times go to this account, on every server with BeamJoy Live.</p>
+            <button class="bjl-btn danger" ng-click="$ctrl.unlink()">Unlink</button>
+        </div>
+
+        <div ng-if="!$ctrl.linked() && !$ctrl.link">
+            <p>Link your BeamJoy Routes account once. Your BeamMP login stays as it is.</p>
+            <button class="bjl-btn primary" ng-click="$ctrl.startLink()">Link account</button>
+        </div>
+
+        <div ng-if="!$ctrl.linked() && $ctrl.link">
+            <div ng-if="$ctrl.link.status === 'starting'" class="bjl-muted">Getting a code…</div>
+            <div ng-if="$ctrl.link.status === 'waiting'">
+                <p>Approve this code in the browser that just opened:</p>
+                <div class="bjl-code">{{$ctrl.link.userCode}}</div>
+                <p class="bjl-small bjl-muted">
+                    No browser? Go to {{$ctrl.siteUrl('/link')}} and type the code. Waiting…
+                </p>
+                <div class="bjl-row">
+                    <button class="bjl-btn" ng-click="$ctrl.openUrl($ctrl.link.verifyUrl)">Open again</button>
+                    <button class="bjl-btn ghost" ng-click="$ctrl.cancelLink()">Cancel</button>
+                </div>
+            </div>
+            <div ng-if="$ctrl.link.status === 'expired'">
+                <p>That code expired.</p>
+                <button class="bjl-btn primary" ng-click="$ctrl.startLink()">New code</button>
+            </div>
+            <div ng-if="$ctrl.link.status === 'error'">
+                <p class="bjl-error">{{$ctrl.link.error}}</p>
+                <button class="bjl-btn" ng-click="$ctrl.startLink()">Try again</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- UPLOAD -->
+    <div class="bjl-body" ng-if="$ctrl.configured() && $ctrl.tab === 'upload'">
+        <p ng-if="!$ctrl.linked()" class="bjl-muted">Link your account first.</p>
+        <p ng-if="$ctrl.linked() && $ctrl.state.config.uploads === false" class="bjl-muted">Uploads are off on this server.</p>
+
+        <div ng-if="$ctrl.linked() && $ctrl.state.config.uploads !== false && !$ctrl.form">
+            <p class="bjl-muted bjl-small">Races on {{$ctrl.state.levelTitle}}</p>
+            <div class="bjl-list" ng-if="$ctrl.races.length">
+                <button class="bjl-item" ng-repeat="r in $ctrl.races track by r.id" ng-click="$ctrl.pickRace(r.id)">
+                    <span class="bjl-truncate">{{r.name}}</span>
+                    <span class="bjl-muted bjl-small">{{r.loopable ? 'Circuit' : 'Sprint'}} · {{r.gates}} gates{{r.props ? ' · ' + r.props + ' props' : ''}}</span>
+                </button>
+            </div>
+            <p ng-if="!$ctrl.races.length" class="bjl-muted">No races on this map yet.</p>
+        </div>
+
+        <div ng-if="$ctrl.form && $ctrl.form.done" class="bjl-card">
+            <p><b>{{$ctrl.form.title}}</b> is up.</p>
+            <div class="bjl-row">
+                <button class="bjl-btn primary" ng-click="$ctrl.openUrl($ctrl.form.done.url)">Open ↗</button>
+                <button class="bjl-btn ghost" ng-click="$ctrl.form = null">Done</button>
+            </div>
+        </div>
+
+        <div ng-if="$ctrl.form && !$ctrl.form.done">
+            <div class="bjl-row">
+                <button class="bjl-btn ghost" ng-click="$ctrl.form = null">← Races</button>
+            </div>
+            <p ng-if="$ctrl.form.loading" class="bjl-muted">Loading the race…</p>
+
+            <div ng-if="!$ctrl.form.loading" style="display: flex; flex-direction: column; gap: 0.6rem">
+                <div class="bjl-card" ng-if="$ctrl.form.listed">
+                    Already on the site as <b>{{$ctrl.form.listed.title}}</b>.
+                    <div class="bjl-row" style="margin-top: 0.4rem">
+                        <button class="bjl-btn" ng-click="$ctrl.openUrl($ctrl.form.listed.url)">Open ↗</button>
+                        <button
+                            class="bjl-btn"
+                            ng-if="$ctrl.form.listed.mine && $ctrl.form.aerial"
+                            ng-disabled="$ctrl.form.uploading"
+                            ng-click="$ctrl.replaceAerial()"
+                        >
+                            Use this aerial there
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bjl-field">
+                    <label for="bjl-title">Name</label>
+                    <input id="bjl-title" ng-model="$ctrl.form.title" maxlength="80" />
+                    <div class="bjl-error" ng-if="$ctrl.form.errors.title">{{$ctrl.form.errors.title}}</div>
+                </div>
+                <div class="bjl-field">
+                    <label for="bjl-desc">Description</label>
+                    <textarea id="bjl-desc" ng-model="$ctrl.form.description" maxlength="4000"></textarea>
+                </div>
+                <div class="bjl-row">
+                    <div class="bjl-field bjl-grow">
+                        <label for="bjl-surface">Surface</label>
+                        <select id="bjl-surface" ng-model="$ctrl.form.surface">
+                            <option ng-repeat="s in $ctrl.lib.SURFACES" value="{{s[0]}}">{{s[1]}}</option>
+                        </select>
+                    </div>
+                    <div class="bjl-field" style="width: 6rem">
+                        <label for="bjl-corners">Corners</label>
+                        <input id="bjl-corners" type="number" min="0" max="999" ng-model="$ctrl.form.corners" placeholder="Auto" />
+                    </div>
+                </div>
+                <div class="bjl-field">
+                    <label for="bjl-tags">Tags</label>
+                    <input id="bjl-tags" ng-model="$ctrl.form.tags" placeholder="circuit, night, technical" />
+                </div>
+                <div class="bjl-field">
+                    <label for="bjl-video">Video</label>
+                    <input id="bjl-video" ng-model="$ctrl.form.videoUrl" placeholder="https://youtube.com/…" />
+                    <div class="bjl-error" ng-if="$ctrl.form.errors.videoUrl">{{$ctrl.form.errors.videoUrl}}</div>
+                </div>
+                <div ng-if="!$ctrl.vanilla()" style="display: flex; flex-direction: column; gap: 0.6rem">
+                    <div class="bjl-field">
+                        <label for="bjl-map">Map name</label>
+                        <input id="bjl-map" ng-model="$ctrl.form.mapName" maxlength="80" />
+                        <div class="bjl-error" ng-if="$ctrl.form.errors.customMapName">{{$ctrl.form.errors.customMapName}}</div>
+                    </div>
+                    <div class="bjl-field">
+                        <label for="bjl-mapurl">Map download</label>
+                        <input id="bjl-mapurl" ng-model="$ctrl.form.mapDownloadUrl" placeholder="https://…" />
+                        <div class="bjl-error" ng-if="$ctrl.form.errors.customMapUrl">{{$ctrl.form.errors.customMapUrl}}</div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="bjl-row" style="margin-bottom: 0.35rem">
+                        <span class="bjl-grow bjl-small bjl-muted">Screenshots ({{$ctrl.form.images.length}}/8)</span>
+                        <button
+                            class="bjl-btn"
+                            ng-disabled="$ctrl.form.capturing || $ctrl.form.images.length >= 8"
+                            ng-click="$ctrl.capture('screenshot')"
+                        >
+                            {{$ctrl.form.capturing === 'screenshot' ? 'Taking…' : 'Take screenshot'}}
+                        </button>
+                    </div>
+                    <div class="bjl-thumbs" ng-if="$ctrl.form.images.length">
+                        <div class="bjl-thumb" ng-repeat="img in $ctrl.form.images track by $index">
+                            <img ng-src="{{img}}" alt="" />
+                            <button ng-click="$ctrl.removeImage($index)" aria-label="Remove">✕</button>
+                        </div>
+                    </div>
+                    <div class="bjl-error" ng-if="$ctrl.form.errors.images">{{$ctrl.form.errors.images}}</div>
+                </div>
+
+                <div>
+                    <div class="bjl-row" style="margin-bottom: 0.35rem">
+                        <span class="bjl-grow bjl-small bjl-muted">Aerial: a top-down shot drawn under the route</span>
+                        <button class="bjl-btn" ng-disabled="$ctrl.form.capturing" ng-click="$ctrl.capture('aerial')">
+                            {{$ctrl.form.capturing === 'aerial' ? 'Flying…' : ($ctrl.form.aerial ? 'Retake' : 'Capture')}}
+                        </button>
+                    </div>
+                    <div class="bjl-thumb" ng-if="$ctrl.form.aerial" style="aspect-ratio: 2 / 1">
+                        <img ng-src="{{$ctrl.form.aerial.dataUrl}}" alt="" />
+                        <button ng-click="$ctrl.form.aerial = null" aria-label="Remove">✕</button>
+                    </div>
+                </div>
+
+                <div class="bjl-error" ng-if="$ctrl.form.errors.form || $ctrl.form.errors.shareCode || $ctrl.form.errors.map || $ctrl.form.errors.aerial">
+                    {{$ctrl.form.errors.form || $ctrl.form.errors.shareCode || $ctrl.form.errors.map || $ctrl.form.errors.aerial}}
+                </div>
+                <button class="bjl-btn primary" ng-disabled="$ctrl.form.uploading" ng-click="$ctrl.upload()">
+                    {{$ctrl.form.uploading ? 'Uploading…' : ($ctrl.form.listed ? 'Upload as a new route' : 'Upload')}}
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TIMES -->
+    <div class="bjl-body" ng-if="$ctrl.configured() && $ctrl.tab === 'times'">
+        <p ng-if="!$ctrl.linked()" class="bjl-muted">Link your account and your laps on listed routes go to their leaderboards.</p>
+        <p ng-if="$ctrl.linked() && $ctrl.state.config.leaderboards === false" class="bjl-muted">Lap posting is off on this server.</p>
+
+        <div ng-if="$ctrl.board">
+            <div class="bjl-row">
+                <b class="bjl-grow bjl-truncate">{{$ctrl.board.route.title}}</b>
+                <button class="bjl-btn ghost" ng-click="$ctrl.refreshBoard()">Refresh</button>
+                <button class="bjl-btn ghost" ng-click="$ctrl.openUrl($ctrl.board.route.url + '/leaderboard')">All ↗</button>
+            </div>
+            <table class="bjl-table">
+                <tr ng-repeat="e in $ctrl.board.entries track by e.userSlug" ng-class="{me: $ctrl.me && e.userSlug === $ctrl.me.slug}">
+                    <td style="width: 1.6rem">{{e.rank}}</td>
+                    <td class="bjl-truncate" style="max-width: 9rem">{{e.name}}</td>
+                    <td class="num">{{$ctrl.lib.formatLap(e.bestLapMs)}}</td>
+                    <td class="num bjl-muted" title="Best theoretical">{{e.theoreticalMs != null ? $ctrl.lib.formatLap(e.theoreticalMs) : ''}}</td>
+                </tr>
+            </table>
+        </div>
+
+        <div>
+            <p class="bjl-small bjl-muted">Your laps this session</p>
+            <p ng-if="!$ctrl.recent.length" class="bjl-muted">None yet. Finish a lap of a race that's on the site.</p>
+            <table class="bjl-table" ng-if="$ctrl.recent.length">
+                <tr ng-repeat="r in $ctrl.recent track by r.at">
+                    <td class="bjl-truncate" style="max-width: 9rem">{{r.name}}</td>
+                    <td class="num">{{$ctrl.lib.formatLap(r.lapMs)}}</td>
+                    <td class="bjl-small" ng-if="r.status === 'posted'">
+                        P{{r.rank}}/{{r.drivers}}<span ng-if="r.isRecord"> · record</span><span ng-if="r.isPB && !r.isRecord"> · PB</span>
+                    </td>
+                    <td class="bjl-small bjl-muted" ng-if="r.status === 'unlisted'">Not on the site</td>
+                    <td class="bjl-small bjl-error" ng-if="r.status === 'failed'" title="{{r.error}}">Not posted</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- LIVE -->
+    <div class="bjl-body" ng-if="$ctrl.configured() && $ctrl.tab === 'live'">
+        <div class="bjl-row">
+            <span class="bjl-dot" ng-class="{on: $ctrl.state.config.liveSessions}"></span>
+            <span class="bjl-grow">
+                {{$ctrl.state.config.liveSessions ? 'This server shares where its players are.' : 'This server doesn\'t share live positions.'}}
+            </span>
+        </div>
+        <p class="bjl-small bjl-muted" ng-if="$ctrl.state.config.liveSessions">
+            One linked player's game sends everyone's position, car and speed every few seconds{{$ctrl.state.reporter ? ': yours, right now.' : '.'}}
+        </p>
+        <p class="bjl-small bjl-error" ng-if="$ctrl.state.reporter && $ctrl.liveStatus && !$ctrl.liveStatus.ok">{{$ctrl.liveStatus.error}}</p>
+        <button
+            class="bjl-btn"
+            ng-click="$ctrl.openUrl($ctrl.liveStatus && $ctrl.liveStatus.url ? $ctrl.liveStatus.url : $ctrl.siteUrl('/live'))"
+        >
+            Open Live ↗
+        </button>
+    </div>
+</div>

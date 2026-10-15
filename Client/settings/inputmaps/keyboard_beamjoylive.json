@@ -1,0 +1,3 @@
+{
+  "bindings": [{ "control": "shift f4", "action": "bjlToggleWindow" }]
+}

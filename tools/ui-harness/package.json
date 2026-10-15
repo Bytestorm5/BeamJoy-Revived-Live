@@ -1,0 +1,11 @@
+{
+  "name": "bjlive-ui-harness",
+  "private": true,
+  "description": "Runs the BeamJoy Live window in a normal browser, with the game's Lua side faked.",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "angular": "1.8.3"
+  }
+}

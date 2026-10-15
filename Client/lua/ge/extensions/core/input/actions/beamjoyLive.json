@@ -1,0 +1,3 @@
+{
+    "bjlToggleWindow": {"cat": "beamjoy", "order": 140, "ctx": "tlua", "onDown": "extensions.beamjoyLive_main.toggleWindow()", "actionMap": "Global", "title": "BeamJoy Live", "desc": "Open or close the BeamJoy Live window (link your account, upload races, lap times)"}
+}
