@@ -73,9 +73,9 @@ def find_bj_repo():
 
 
 def syntax():
-    for base, _, files in os.walk(ROOT):
-        if "node_modules" in base or ".tmp" in base:
-            continue
+    for base, dirs, files in os.walk(ROOT):
+        # this repo's own Lua : not node_modules, temp folders, or a BeamJoy checkout (.beamjoy in CI)
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "node_modules"]
         for f in files:
             if not f.endswith(".lua"):
                 continue
