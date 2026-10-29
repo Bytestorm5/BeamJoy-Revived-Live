@@ -303,9 +303,9 @@ bjlive.component("bjlive", {
         };
 
         // --- laps -------------------------------------------------------------------------------
+        // The server plugin posts laps (from BeamJoy's race events, or this game's freeroam runs)
+        // and says what became of each : the Times tab lists them and shows the route's board.
         ctrl.board = null; // { route, start, entries } for the race last driven
-        // laps and withdrawals go out in order, one at a time
-        let lapQueue = Promise.resolve();
         const loadBoard = async (route, start) => {
             try {
                 const b = await site.leaderboard(route.slug, "lap", 10, start);
@@ -313,91 +313,12 @@ bjlive.component("bjlive", {
             } catch (e) {}
         };
         ctrl.refreshBoard = () => ctrl.board && loadBoard(ctrl.board.route, ctrl.board.start);
-        const addRecent = (entry) =>
-            $scope.$applyAsync(() => {
-                ctrl.recent.unshift(entry);
-                ctrl.recent.length = Math.min(ctrl.recent.length, MAX_RECENT);
-            });
-        const onLap = (lap) => {
-            lapQueue = lapQueue.then(async () => {
-                const entry = { name: lap.course.name, lapMs: lap.lapMs, start: lap.start, at: Date.now() };
-                try {
-                    const route = await matchCourse(lap.course);
-                    if (!route) {
-                        entry.status = "unlisted";
-                    } else {
-                        entry.route = route;
-                        let res;
-                        for (let attempt = 0; ; attempt++) {
-                            try {
-                                res = await site.lap({
-                                    route: route.slug,
-                                    lapMs: lap.lapMs,
-                                    sectors: lap.sectors || undefined,
-                                    vehicle: lap.vehicle,
-                                    playerName: lap.playerName,
-                                    start: lap.start,
-                                    run: lap.run || undefined,
-                                    runLap: lap.runLap || undefined,
-                                    kind: lap.kind,
-                                });
-                                break;
-                            } catch (e) {
-                                // the site has it already (an answer lost on the way, a resend)
-                                if (e.status === 429) {
-                                    res = null;
-                                    break;
-                                }
-                                if (e.status !== 0 || attempt >= 2) throw e;
-                                await new Promise((r) => setTimeout(r, 3000));
-                            }
-                        }
-                        if (!res) {
-                            entry.status = "duplicate";
-                            return addRecent(entry);
-                        }
-                        Object.assign(entry, { status: "posted", ...res });
-                        const tag = res.isRecord ? " · new record!" : res.isPB ? " · new PB" : "";
-                        bjlLua.send(
-                            "notify",
-                            `${lib.formatLap(lap.lapMs)} on ${route.title} · P${res.rank} of ${res.drivers}${tag}`,
-                            res.isRecord || res.isPB ? "success" : "info"
-                        );
-                        loadBoard(route, res.start || lap.start);
-                    }
-                } catch (e) {
-                    entry.status = "failed";
-                    entry.error = e.message;
-                }
-                addRecent(entry);
-            });
-        };
-        // The race disqualified this player after laps of theirs went out : the site takes the
-        // run's laps back. If they're reinstated, Lua sends the laps again.
-        const onWithdraw = ({ course, run }) => {
-            lapQueue = lapQueue.then(async () => {
-                const entry = { name: course.name, at: Date.now(), status: "withdrawn" };
-                try {
-                    const route = await matchCourse(course);
-                    if (!route) return;
-                    entry.route = route;
-                    for (let attempt = 0; ; attempt++) {
-                        try {
-                            await site.withdraw(route.slug, run);
-                            break;
-                        } catch (e) {
-                            if (e.status !== 0 || attempt >= 2) throw e;
-                            await new Promise((r) => setTimeout(r, 3000));
-                        }
-                    }
-                    bjlLua.send("notify", `Disqualified : your laps on ${route.title} were taken off the site.`, "info");
-                    if (ctrl.board && ctrl.board.route.slug === route.slug) ctrl.refreshBoard();
-                } catch (e) {
-                    entry.status = "failed";
-                    entry.error = e.message;
-                }
-                addRecent(entry);
-            });
+        const onLapResult = (entry) => {
+            ctrl.recent.unshift({ ...entry, at: Date.now() });
+            ctrl.recent.length = Math.min(ctrl.recent.length, MAX_RECENT);
+            if (entry.route && ["posted", "duplicate", "withdrawn"].includes(entry.status)) {
+                loadBoard(entry.route, entry.start || (ctrl.board && ctrl.board.start));
+            }
         };
 
         // --- road map & live session ------------------------------------------------------------
@@ -421,20 +342,6 @@ bjlive.component("bjlive", {
                 roadsChecked.delete(level);
             }
         };
-        let liveBusy = false;
-        ctrl.liveStatus = null;
-        const onLiveReport = async (payload) => {
-            if (liveBusy) return;
-            liveBusy = true;
-            try {
-                const res = await site.live(payload);
-                $scope.$applyAsync(() => (ctrl.liveStatus = { ok: true, url: res.url, at: Date.now() }));
-            } catch (e) {
-                $scope.$applyAsync(() => (ctrl.liveStatus = { ok: false, error: e.message, at: Date.now() }));
-            }
-            liveBusy = false;
-        };
-
         // --- Lua events -------------------------------------------------------------------------
         let hinted = false;
         let lastToken = null;
@@ -466,17 +373,16 @@ bjlive.component("bjlive", {
                 case "BJLCaptured":
                     onCaptured(payload);
                     break;
-                case "BJLLap":
-                    onLap(payload);
+                case "BJLLapResult":
+                    onLapResult(payload || {});
                     break;
-                case "BJLWithdraw":
-                    onWithdraw(payload);
+                case "BJLOpen":
+                    // the BeamJoy Live page's buttons
+                    if (payload && payload.tab) ctrl.tab = payload.tab;
+                    if (!ctrl.open) ctrl.toggle(true);
                     break;
                 case "BJLRoads":
                     onRoads(payload);
-                    break;
-                case "BJLLiveReport":
-                    onLiveReport(payload);
                     break;
                 case "BJLHttpResult":
                     relay.deliver(payload || {});

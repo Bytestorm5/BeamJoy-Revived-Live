@@ -247,8 +247,6 @@ export function createSite(getBase, transport) {
         upload: (body) => request("POST", "/api/game/routes", body, { timeout: 120000 }),
         replaceAerial: (slug, body) =>
             request("POST", `/api/game/routes/${encodeURIComponent(slug)}/aerial`, body, { timeout: 60000 }),
-        lap: (body) => request("POST", "/api/game/laps", body),
-        withdraw: (slug, run) => request("POST", "/api/game/laps/withdraw", { route: slug, run }),
         leaderboard: (slug, sort = "lap", size = 10, start = "") =>
             request(
                 "GET",
@@ -258,6 +256,5 @@ export function createSite(getBase, transport) {
         level: (level) => request("GET", `/api/game/levels/${encodeURIComponent(level)}`),
         uploadRoads: (level, map) =>
             request("POST", `/api/game/levels/${encodeURIComponent(level)}/roads`, map, { timeout: 120000 }),
-        live: (body) => request("POST", "/api/game/live", body, { timeout: 8000 }),
     };
 }

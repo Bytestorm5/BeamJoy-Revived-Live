@@ -3,3 +3,4 @@ dist/
 node_modules/
 tools/ui-harness/package-lock.json
 tools/ui-harness/fixtures/*.local.json
+tools/.tmp-*/

@@ -524,12 +524,11 @@
             </span>
         </div>
         <p class="bjl-small bjl-muted" ng-if="$ctrl.state.config.liveSessions">
-            One linked player's game sends everyone's position, car and speed every few seconds{{$ctrl.state.reporter ? ': yours, right now.' : '.'}}
+            One player's game sends everyone's position, car and speed every few seconds{{$ctrl.state.reporter ? ': yours, right now.' : '.'}}
         </p>
-        <p class="bjl-small bjl-error" ng-if="$ctrl.state.reporter && $ctrl.liveStatus && !$ctrl.liveStatus.ok">{{$ctrl.liveStatus.error}}</p>
         <button
             class="bjl-btn"
-            ng-click="$ctrl.openUrl($ctrl.liveStatus && $ctrl.liveStatus.url ? $ctrl.liveStatus.url : $ctrl.siteUrl('/live'))"
+            ng-click="$ctrl.openUrl($ctrl.state.liveUrl || $ctrl.siteUrl('/live'))"
         >
             Open Live ↗
         </button>

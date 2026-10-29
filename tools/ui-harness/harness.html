@@ -18,7 +18,7 @@
     <button onclick="fake.toggle()">Shift+F4</button>
     <button onclick="fake.lap()">Finish a lap</button>
     <button onclick="fake.disqualify()">Disqualified</button>
-    <button onclick="fake.live()">Live report</button>
+    <button onclick="fake.openFromPage()">BeamJoy page: Upload</button>
   </div>
   <script type="module">
     // A stand-in for the game's Lua: answers beamjoyLive_main.dispatch(...) calls the way
@@ -103,23 +103,39 @@
         (handlers[event] || (() => {}))(...args);
       },
     };
-    // one grid run (a race session's phase), its laps numbered like laps.lua does
-    const run = `harness-${Date.now()}#1`;
+    // The server plugin's part : it posts a lap BeamJoy's API reported (Server/BeamJoyLive/lib/laps.lua)
+    // and tells the game what became of it. Here the page posts it itself, one run of laps.
+    const run = `harness-${Date.now()}#1#k1`;
     let runLap = 0;
+    let route = null;
+    const siteJson = async (method, path, body) => {
+      const headers = { "Content-Type": "application/json" };
+      if (state.account) headers.Authorization = `Bearer ${state.account.token}`;
+      const res = await fetch(site + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+      return { status: res.status, data: await res.json().catch(() => ({})) };
+    };
+    const routeOf = async () => route || (route = (await siteJson("POST", "/api/game/routes/match", course())).data.route);
     window.fake = {
       toggle: () => emit("BJLToggle", {}),
-      lap: (lapMs = 299000 + Math.round(Math.random() * 20000), sectors) => {
+      lap: async (lapMs = 299000 + Math.round(Math.random() * 20000)) => {
         runLap++;
         // a circuit's first lap from the grid is a standing start, the rest flying
         const start = race.loopable && runLap > 1 ? "flying" : "standing";
-        emit("BJLLap", { course: course(), lapMs, sectors: sectors ?? null, vehicle: "Hirochi SBR4", playerName: state.selfName,
-          start, run, runLap, kind: "grid" });
+        const r = await routeOf();
+        if (!r) return emit("BJLLapResult", { name: race.name, lapMs, start, status: "unlisted" });
+        const { status, data } = await siteJson("POST", "/api/game/laps",
+          { route: r.slug, lapMs, vehicle: "Hirochi SBR4", playerName: state.selfName, start, run, runLap });
+        emit("BJLLapResult", { name: r.title, route: r, lapMs, start, ...(status === 200 ? { status: "posted", ...data }
+          : { status: status === 429 ? "duplicate" : "failed", error: data.error }) });
       },
-      disqualify: () => emit("BJLWithdraw", { course: course(), run }),
-      live: () => emit("BJLLiveReport", {
-        serverKey: "srv_harness_key_0123456789", serverName: state.config.serverName, level: state.level, mapName: state.levelTitle,
-        players: [{ name: "HarnessDriver", vehicle: "Hirochi SBR4", pos: [race.gates[0].pos.x, race.gates[0].pos.y, 0], heading: 45, speed: 30, activity: "", spectating: false }],
-      }),
+      disqualify: async () => {
+        const r = await routeOf();
+        if (!r) return;
+        await siteJson("POST", "/api/game/laps/withdraw", { route: r.slug, run });
+        emit("BJLLapResult", { name: r.title, route: r, status: "withdrawn" });
+      },
+      // the BeamJoy Live page's "Upload a race"
+      openFromPage: () => emit("BJLOpen", { tab: "upload" }),
       emit,
     };
     // The game's UI must go through the server plugin's relay; this page can fetch the site itself.

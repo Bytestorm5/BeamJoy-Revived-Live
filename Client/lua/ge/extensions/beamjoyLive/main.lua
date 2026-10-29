@@ -1,22 +1,24 @@
 --[[
 BeamJoy Live : client entry point (extension `beamjoyLive_main`).
 
-Connects BeamJoy-Revived to BeamJoy Web without changing BeamJoy itself : this extension listens
-to the same server messages BeamJoy's own modules get (through `beamjoy_communications`), reads
-BeamJoy's race cache (`beamjoy_races.data`), and talks to its own window (ui/modModules/bjlive).
-The window builds every web request; the server plugin makes it (the game's UI may only
-connect to localhost), with the token the player got by linking their account.
+The game's side of BeamJoy Live. The server plugin (Server/BeamJoyLive) does most of the work
+through BeamJoy's plugin API : laps to the site, the BeamJoy Live page, the Live page. The game
+does what only the game can : keeps the player's link to their site account (and tells the
+plugin), runs the window (ui/modModules/bjlive : uploads, screenshots, the aerial camera), uploads
+the level's road map, reports freeroam runs and, on one game per server, where every car is.
 
 Lua -> UI : guihooks event "BJLEvent" { event, payload }.
 UI -> Lua : beamjoyLive_main.dispatch(event, args).
-Server plugin <-> Lua : BeamMP events "BJLConfig", "BJLReporter" and the web relay's "BJLHttp*"
-(Server/BeamJoyLive/main.lua).
+Server plugin <-> Lua : BeamMP events, JSON escaped by escapeWire (Server/BeamJoyLive/lib) :
+  to the plugin   BJLHello, BJLAccount, BJLVehicle, BJLFreeroamLap, BJLLive, BJLHttp*
+  from it         BJLConfig, BJLReporter, BJLAccountSet, BJLLapResult, BJLLiveStatus, BJLOpen,
+                  BJLOpenUrl, BJLHttpResult/Part (the window's site requests, relayed)
 ]]
 
 local M = {
     dependencies = { "beamjoyLive_capture", "beamjoyLive_laps", "beamjoyLive_live" },
 
-    VERSION = "1.1.0",
+    VERSION = "2.0.0",
     UI_EVENT = "BJLEvent",
     --- where the link token is kept, in the player's BeamNG user folder (shared by every server)
     ACCOUNT_FILE = "settings/beamjoyLive/account.json",
@@ -26,9 +28,10 @@ local M = {
     config = nil,
     ---@type {token: string, user: {name: string, slug: string}}?
     account = nil,
-    --- this game sends the server's live player list (picked by the server plugin)
+    --- this game sends where every car is (picked by the server plugin)
     reporter = false,
-    serverKey = nil,
+    --- the server's page on the site's Live page, once the plugin posted it
+    liveUrl = nil,
 
     handlers = {},
 }
@@ -108,6 +111,7 @@ function M.state()
         levelTitle = M.levelTitle(level),
         selfName = M.selfName(),
         reporter = M.reporter,
+        liveUrl = M.liveUrl,
         beamjoy = beamjoy_races ~= nil,
     }
 end
@@ -116,10 +120,35 @@ function M.pushState()
     M.send("BJLState", M.state())
 end
 
---- Tells the server plugin whether this game can report live sessions (it's linked).
-local function announceLink()
-    if TriggerServerEvent then
-        pcall(TriggerServerEvent, "BJLCanReport", M.account and "1" or "0")
+--- a message from the server plugin (escaped JSON), or nil
+local function decodeServer(raw)
+    local ok, data = pcall(jsonDecode, M.unescapeWire(type(raw) == "string" and raw or ""))
+    return ok and type(data) == "table" and data or nil
+end
+
+--- a message to the server plugin
+function M.toServer(event, payload)
+    if not TriggerServerEvent then return end
+    local ok, err = pcall(function() M.queueServer({ { event, M.escapeWire(jsonEncode(payload or {})) } }) end)
+    if not ok then log("couldn't send " .. event .. " : " .. tostring(err)) end
+end
+
+--- Tells the server plugin which site account this game is linked to : it posts this player's laps
+--- as them (the token stays in the server's memory while they're connected).
+local function announceAccount()
+    M.toServer("BJLAccount", M.account and { token = M.account.token, user = M.account.user } or {})
+end
+
+--- the car this player's in, and its name : BeamJoy's events only carry the model
+local function reportVehicle(vid)
+    local ok, model, label = pcall(function()
+        local veh = vid and be:getObjectByID(vid) or be:getPlayerVehicle(0)
+        local m = veh and veh:getJBeamFilename()
+        local l = m and beamjoy_vehicles and beamjoy_vehicles.getModelLabel and beamjoy_vehicles.getModelLabel(m)
+        return m, l
+    end)
+    if ok and type(model) == "string" and type(label) == "string" and label ~= "" and label ~= "?" then
+        M.toServer("BJLVehicle", { model = model, label = label })
     end
 end
 
@@ -128,19 +157,42 @@ local function hello()
 end
 
 local function onConfig(raw)
-    local ok, data = pcall(jsonDecode, raw)
-    if not ok or type(data) ~= "table" then return end
+    local data = decodeServer(raw)
+    if not data then return end
     data.siteUrl = type(data.siteUrl) == "string" and data.siteUrl:gsub("/+$", "") or ""
     M.config = data
     M.pushState()
-    announceLink()
+    announceAccount()
+    reportVehicle()
 end
 
 local function onReporter(raw)
-    local ok, data = pcall(jsonDecode, raw)
-    if not ok or type(data) ~= "table" then return end
+    local data = decodeServer(raw)
+    if not data then return end
     M.reporter = data.reporter == true
-    M.serverKey = M.reporter and data.serverKey or nil
+    M.pushState()
+end
+
+--- the BeamJoy Live page linked (or unlinked) this game : it keeps the token, like the window's own
+local function onAccountSet(raw)
+    local data = decodeServer(raw)
+    if not data then return end
+    if data.clear then
+        M.account = nil
+    elseif type(data.token) == "string" and data.token ~= "" then
+        M.account = { token = data.token, user = type(data.user) == "table" and data.user or {} }
+    else
+        return
+    end
+    writeAccount()
+    announceAccount()
+    M.pushState()
+end
+
+local function onLiveStatus(raw)
+    local data = decodeServer(raw)
+    if not data then return end
+    M.liveUrl = type(data.url) == "string" and data.url or nil
     M.pushState()
 end
 
@@ -350,6 +402,7 @@ end
 M.onHttpResult, M.onHttpPart, M.http = onHttpResult, onHttpPart, http
 M.drainRelay = drain
 M.relayBacklog = function() return #outbox end
+M.queueServer = queue
 
 ---------------------------------------------------------------------------------------------------
 -- UI calls
@@ -372,13 +425,13 @@ M.handlers = {
         if type(token) ~= "string" or token == "" then return end
         M.account = { token = token, user = type(user) == "table" and user or {} }
         writeAccount()
-        announceLink()
+        announceAccount()
         M.pushState()
     end,
     clearAccount = function()
         M.account = nil
         writeAccount()
-        announceLink()
+        announceAccount()
         M.pushState()
     end,
     openUrl = openUrl,
@@ -409,11 +462,29 @@ end
 ---------------------------------------------------------------------------------------------------
 -- lifecycle
 
+--- what the server plugin passes on to the window as it is
+local function forward(event)
+    return function(raw)
+        local data = decodeServer(raw)
+        if data then M.send(event, data) end
+    end
+end
+
 local registered = false
 local function registerServerEvents()
     if registered or not AddEventHandler then return end
     AddEventHandler("BJLConfig", onConfig)
     AddEventHandler("BJLReporter", onReporter)
+    AddEventHandler("BJLAccountSet", onAccountSet)
+    AddEventHandler("BJLLiveStatus", onLiveStatus)
+    -- a lap of this player's, posted (or not) by the plugin : the window's Times tab
+    AddEventHandler("BJLLapResult", forward("BJLLapResult"))
+    -- the BeamJoy Live page's buttons
+    AddEventHandler("BJLOpen", forward("BJLOpen"))
+    AddEventHandler("BJLOpenUrl", function(raw)
+        local data = decodeServer(raw)
+        if data then openUrl(data.url) end
+    end)
     AddEventHandler("BJLHttpResult", onHttpResult)
     AddEventHandler("BJLHttpPart", onHttpPart)
     registered = true
@@ -447,6 +518,10 @@ function M.onClientStartMission()
     pushRaces()
 end
 
+function M.onVehicleSwitched(_, newId)
+    if M.config then reportVehicle(newId) end
+end
+
 function M.onUpdate(dtReal)
     if #outbox > 0 then drain(dtReal) end
 end
@@ -461,7 +536,7 @@ function M.onServerLeave()
     outbox = {}
     M.config = nil
     M.reporter = false
-    M.serverKey = nil
+    M.liveUrl = nil
     M.send("BJLUnload", {})
     if extensions and extensions.unload then
         for _, name in ipairs(M.EXTENSIONS) do pcall(extensions.unload, name) end

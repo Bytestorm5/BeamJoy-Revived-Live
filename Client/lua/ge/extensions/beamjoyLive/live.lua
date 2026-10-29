@@ -1,9 +1,10 @@
 --[[
 BeamJoy Live : live session reporter (extension `beamjoyLive_live`).
 
-When the host turned LiveSessions on, the server plugin picks one linked player's game to report
-for the whole server. That game sends every few seconds who's on, in what, where and how fast :
-everything here is what any player's game already sees of the others.
+When the host turned the Live page on, the server plugin picks one game to report for the whole
+server. That game sends the plugin, every few seconds, who's on, in what, where and how fast :
+everything here is what any player's game already sees of the others. The plugin adds what each
+racer is doing (BeamJoy's plugin API) and posts it to the site.
 ]]
 
 local M = {
@@ -23,32 +24,6 @@ local function vehicleLabel(model)
         if ok and type(label) == "string" and label ~= "" then return label end
     end
     return model
-end
-
---- this player's own race, for the activity line ("Racing <name> · lap 2/5")
-local function selfActivity()
-    local runner = beamjoy_raceRunner
-    local session = runner and runner.session
-    if type(session) ~= "table" or session.state ~= "RACE" then return "" end
-    local race = beamjoyLive_main.findRace(session.raceId)
-    local me = beamjoyLive_main.selfName()
-    for _, p in ipairs(type(session.participants) == "table" and session.participants or {}) do
-        if p.playerName == me then
-            local laps = session.settings and tonumber(session.settings.laps)
-            local lap = tonumber(p.currentLap) or 1
-            local name = race and race.name or "a race"
-            -- an event in phases (BeamJoy's race phases) : which one, "Qualifying"
-            local phases = type(session.phases) == "table" and session.phases or {}
-            local phase = #phases > 1 and phases[tonumber(session.phaseIndex) or 1] or nil
-            if type(phase) == "table" and type(phase.name) == "string" and phase.name ~= "" then
-                name = name .. " · " .. phase.name
-            end
-            if p.finished then return "Finished " .. name end
-            return laps and laps > 1 and string.format("Racing %s · lap %d/%d", name, math.min(lap, laps), laps)
-                or ("Racing " .. name)
-        end
-    end
-    return ""
 end
 
 --- The game object each player is driving : the vehicle BeamJoy says is current, else their first.
@@ -103,24 +78,28 @@ local function names()
     return out
 end
 
+--- to the decimetre : the message stays small
+local function round(v)
+    return math.floor(v * 10 + .5) / 10
+end
+
 local function snapshot()
-    local me = beamjoyLive_main.selfName()
     local vehicles = playerVehicles()
     local out = {}
     for _, name in ipairs(names()) do
-        local entry = { name = name, vehicle = "", activity = name == me and selfActivity() or "", spectating = true }
+        local entry = { name = name, vehicle = "", spectating = true }
         local v = currentFor(name, vehicles[name])
         local obj = v and be:getObjectByID(v.gameVehicleID)
         if obj then
             local pos, vel, dir = obj:getPosition(), obj:getVelocity(), obj:getDirectionVector()
-            entry.pos = { pos.x, pos.y, pos.z }
-            entry.speed = vel and vel:length() or 0
-            entry.heading = dir and (math.deg(math.atan2(dir.x, dir.y)) % 360) or 0
+            entry.pos = { round(pos.x), round(pos.y), round(pos.z) }
+            entry.speed = round(vel and vel:length() or 0)
+            entry.heading = math.floor((dir and (math.deg(math.atan2(dir.x, dir.y)) % 360) or 0) + .5)
             entry.vehicle = vehicleLabel(v.jbeam)
             entry.spectating = false
         end
         out[#out + 1] = entry
-        if #out >= 128 then break end
+        if #out >= 100 then break end
     end
     return out
 end
@@ -128,7 +107,7 @@ end
 function M.onUpdate()
     local main = beamjoyLive_main
     local c = main.config
-    if not (c and c.liveSessions and main.reporter and main.serverKey and main.account) then return end
+    if not (c and c.liveSessions and main.reporter) then return end
     local t = now()
     if t - M.last < M.INTERVAL_S then return end
     M.last = t
@@ -136,13 +115,7 @@ function M.onUpdate()
     if not ok then return main.log("live snapshot failed : " .. tostring(players)) end
     local level = main.level()
     if not level then return end
-    main.send("BJLLiveReport", {
-        serverKey = main.serverKey,
-        serverName = c.serverName,
-        level = level,
-        mapName = main.levelTitle(level),
-        players = players,
-    })
+    main.toServer("BJLLive", { level = level, mapName = main.levelTitle(level), players = players })
 end
 
 M.snapshot = snapshot

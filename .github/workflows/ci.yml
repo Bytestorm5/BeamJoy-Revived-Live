@@ -1,4 +1,5 @@
-# Lua tests on every push; on a v* tag, also builds the zips and attaches them to a release.
+# Lua tests on every push, against BeamJoy-Revived's released and development API helper; on a
+# v* tag, also builds the zips and attaches them to a release.
 name: CI
 
 on:
@@ -11,13 +12,32 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        beamjoy: [main, development]
     steps:
       - uses: actions/checkout@v4
+      # BeamJoy's plugin API helper (GPL, loaded from BeamJoy's own folder in production) : the
+      # server plugin's tests load the real one
+      - uses: actions/checkout@v4
+        with:
+          repository: foodcache3/BeamJoy-Revived
+          ref: ${{ matrix.beamjoy }}
+          path: .beamjoy
+          sparse-checkout: BeamJoyServer/api
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install lupa
       - run: python3 tools/lua_tests.py
+        env:
+          BJ_REPO: .beamjoy
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - run: python3 tools/build.py
       - uses: actions/upload-artifact@v4
         with:
