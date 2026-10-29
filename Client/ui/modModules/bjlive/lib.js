@@ -33,6 +33,7 @@ export function portableRace(race) {
         oneWayGates: race.oneWayGates,
         gates: list(race.gates),
         startPositions: list(race.startPositions),
+        pit: race.pit,
         props: list(race.props),
         defaults: race.defaults,
     });
@@ -247,8 +248,13 @@ export function createSite(getBase, transport) {
         replaceAerial: (slug, body) =>
             request("POST", `/api/game/routes/${encodeURIComponent(slug)}/aerial`, body, { timeout: 60000 }),
         lap: (body) => request("POST", "/api/game/laps", body),
-        leaderboard: (slug, sort = "lap", size = 10) =>
-            request("GET", `/api/routes/${encodeURIComponent(slug)}/leaderboard?sort=${sort}&size=${size}`),
+        withdraw: (slug, run) => request("POST", "/api/game/laps/withdraw", { route: slug, run }),
+        leaderboard: (slug, sort = "lap", size = 10, start = "") =>
+            request(
+                "GET",
+                `/api/routes/${encodeURIComponent(slug)}/leaderboard?sort=${sort}&size=${size}` +
+                    (start ? `&start=${encodeURIComponent(start)}` : "")
+            ),
         level: (level) => request("GET", `/api/game/levels/${encodeURIComponent(level)}`),
         uploadRoads: (level, map) =>
             request("POST", `/api/game/levels/${encodeURIComponent(level)}/roads`, map, { timeout: 120000 }),

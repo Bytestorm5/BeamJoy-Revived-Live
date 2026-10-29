@@ -16,7 +16,7 @@ Server plugin <-> Lua : BeamMP events "BJLConfig", "BJLReporter" and the web rel
 local M = {
     dependencies = { "beamjoyLive_capture", "beamjoyLive_laps", "beamjoyLive_live" },
 
-    VERSION = "1.0.0",
+    VERSION = "1.1.0",
     UI_EVENT = "BJLEvent",
     --- where the link token is kept, in the player's BeamNG user folder (shared by every server)
     ACCOUNT_FILE = "settings/beamjoyLive/account.json",
@@ -157,12 +157,16 @@ function M.findRace(raceId)
     end
 end
 
-local function propTotal(props)
+--- the race's prop count, weighed like BeamJoy's prop budget. BeamJoy's race cache carries it
+--- (`propTotal`) and leaves the props themselves out (fetched when needed, see pushRace) ; an older
+--- BeamJoy sends the props
+local function propTotal(race)
+    if tonumber(race.propTotal) then return tonumber(race.propTotal) end
     if beamjoy_props and beamjoy_props.total then
-        local ok, n = pcall(beamjoy_props.total, props)
+        local ok, n = pcall(beamjoy_props.total, race.props)
         if ok then return n end
     end
-    return type(props) == "table" and #props or 0
+    return type(race.props) == "table" and #race.props or 0
 end
 
 --- What the site needs to recognise a race : its map and its gates, in order.
@@ -192,7 +196,7 @@ local function pushRaces()
             author = r.author,
             loopable = r.loopable == true,
             gates = type(r.gates) == "table" and #r.gates or 0,
-            props = propTotal(r.props),
+            props = propTotal(r),
         }
     end
     table.sort(list, function(a, b) return tostring(a.name):lower() < tostring(b.name):lower() end)
@@ -200,10 +204,25 @@ local function pushRaces()
 end
 
 --- The whole race, for the window to build its share code (same fields as BeamJoy's editor).
+--- BeamJoy's race cache leaves props out : they're asked for (beamjoy_races.getProps) and the race
+--- goes to the window once they're in.
 local function pushRace(raceId)
     local race = M.findRace(raceId)
     if not race then return M.send("BJLRace", { id = raceId, missing = true }) end
-    M.send("BJLRace", { id = raceId, race = race, course = M.course(race) })
+    local function send(props)
+        local copy = {}
+        for k, v in pairs(race) do copy[k] = v end
+        copy.props = type(props) == "table" and props or {}
+        M.send("BJLRace", { id = raceId, race = copy, course = M.course(race) })
+    end
+    if not (beamjoy_races and beamjoy_races.getProps) then return send(race.props) end
+    local ok, props = pcall(beamjoy_races.getProps, raceId, send)
+    if not ok then
+        log("props of race " .. tostring(raceId) .. " : " .. tostring(props))
+        return send(race.props)
+    end
+    -- here already (or none) ; otherwise `send` runs once they come
+    if props then send(props) end
 end
 
 function M.onBJRacesChanged()
@@ -220,6 +239,41 @@ end
 local CHUNK = 12000
 --- id -> answer being received
 local answers = {}
+
+--- Pacing, as BeamJoy's own sends (its communications/tx.lua) : a big upload's parts all at
+--- once overfill the player's connection, which can crash a BeamMP launcher. Events wait in
+--- `outbox` and leave at RATE bytes a second, up to BURST at a time ; a small request goes
+--- straight out when nothing waits ahead of it. Order is kept.
+M.RATE = 400000
+M.BURST = 40000
+M.SMALL = 4000
+---@type string[][] {event, data}, oldest first
+local outbox = {}
+local allowance = M.BURST
+
+local function drain(dt)
+    allowance = math.min(M.BURST, allowance + M.RATE * (tonumber(dt) or 0))
+    while #outbox > 0 do
+        local size = #outbox[1][2]
+        -- a part bigger than what's left waits, unless the budget is full (it would never fit)
+        if size > allowance and allowance < M.BURST then break end
+        local ev = table.remove(outbox, 1)
+        TriggerServerEvent(ev[1], ev[2])
+        allowance = allowance - size
+    end
+end
+
+--- queues one message's events (sent at once when small and nothing waits)
+local function queue(events)
+    local size = 0
+    for _, ev in ipairs(events) do size = size + #ev[2] end
+    if #outbox == 0 and size <= M.SMALL then
+        for _, ev in ipairs(events) do TriggerServerEvent(ev[1], ev[2]) end
+        return
+    end
+    for _, ev in ipairs(events) do outbox[#outbox + 1] = ev end
+    drain(0)
+end
 
 local function escapeWire(s)
     return (s:gsub("[~Z]", { ["~"] = "~t", ["Z"] = "~z" }))
@@ -259,17 +313,18 @@ local function http(id, method, path, body, contentType)
         return answer(id, 0, '{"error":"Not connected to a server with BeamJoy Live."}')
     end
     local parts = split(type(body) == "string" and body or "", CHUNK)
-    TriggerServerEvent("BJLHttp", escapeWire(jsonEncode({
+    local events = { { "BJLHttp", escapeWire(jsonEncode({
         id = id,
         method = method,
         path = path,
         token = M.account and M.account.token or nil,
         contentType = contentType ~= "" and contentType or nil,
         parts = #parts,
-    })))
+    })) } }
     for i, part in ipairs(parts) do
-        TriggerServerEvent("BJLHttpPart", escapeWire(jsonEncode({ id = id, part = i, data = part })))
+        events[#events + 1] = { "BJLHttpPart", escapeWire(jsonEncode({ id = id, part = i, data = part })) }
     end
+    queue(events)
 end
 
 local function onHttpResult(raw)
@@ -293,6 +348,8 @@ local function onHttpPart(raw)
     end
 end
 M.onHttpResult, M.onHttpPart, M.http = onHttpResult, onHttpPart, http
+M.drainRelay = drain
+M.relayBacklog = function() return #outbox end
 
 ---------------------------------------------------------------------------------------------------
 -- UI calls
@@ -390,12 +447,25 @@ function M.onClientStartMission()
     pushRaces()
 end
 
+function M.onUpdate(dtReal)
+    if #outbox > 0 then drain(dtReal) end
+end
+
+--- the client mod's files go with the server : what's loaded of ours is unloaded too. Leaving a
+--- server reloads Lua since BeamNG 0.40, which would try to load every extension still loaded
+--- again, from files no longer mounted (BeamJoy does the same for its own, main.lua)
+M.EXTENSIONS = { "beamjoyLive_live", "beamjoyLive_laps", "beamjoyLive_capture", "beamjoyLive_main" }
+
 function M.onServerLeave()
     answers = {}
+    outbox = {}
     M.config = nil
     M.reporter = false
     M.serverKey = nil
     M.send("BJLUnload", {})
+    if extensions and extensions.unload then
+        for _, name in ipairs(M.EXTENSIONS) do pcall(extensions.unload, name) end
+    end
 end
 
 return M

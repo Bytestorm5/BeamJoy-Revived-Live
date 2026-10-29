@@ -376,7 +376,7 @@
                         <button class="bjl-btn" ng-click="$ctrl.openUrl($ctrl.form.listed.url)">Open ↗</button>
                         <button
                             class="bjl-btn"
-                            ng-if="$ctrl.form.listed.mine && $ctrl.form.aerial"
+                            ng-if="($ctrl.form.listed.canEdit || $ctrl.form.listed.mine) && $ctrl.form.aerial"
                             ng-disabled="$ctrl.form.uploading"
                             ng-click="$ctrl.replaceAerial()"
                         >
@@ -478,11 +478,15 @@
 
         <div ng-if="$ctrl.board">
             <div class="bjl-row">
-                <b class="bjl-grow bjl-truncate">{{$ctrl.board.route.title}}</b>
+                <b class="bjl-grow bjl-truncate">
+                    {{$ctrl.board.route.title}}<span class="bjl-muted" ng-if="$ctrl.board.boards.standing && $ctrl.board.boards.flying">
+                        · {{$ctrl.board.start === 'flying' ? 'flying start' : 'standing start'}}</span>
+                </b>
                 <button class="bjl-btn ghost" ng-click="$ctrl.refreshBoard()">Refresh</button>
-                <button class="bjl-btn ghost" ng-click="$ctrl.openUrl($ctrl.board.route.url + '/leaderboard')">All ↗</button>
+                <button class="bjl-btn ghost" ng-click="$ctrl.openUrl($ctrl.board.route.url + '/leaderboard' + ($ctrl.board.start ? '?start=' + $ctrl.board.start : ''))">All ↗</button>
             </div>
-            <table class="bjl-table">
+            <p ng-if="!$ctrl.board.entries.length" class="bjl-muted">No times.</p>
+            <table class="bjl-table" ng-if="$ctrl.board.entries.length">
                 <tr ng-repeat="e in $ctrl.board.entries track by e.userSlug" ng-class="{me: $ctrl.me && e.userSlug === $ctrl.me.slug}">
                     <td style="width: 1.6rem">{{e.rank}}</td>
                     <td class="bjl-truncate" style="max-width: 9rem">{{e.name}}</td>
@@ -496,13 +500,15 @@
             <p class="bjl-small bjl-muted">Your laps this session</p>
             <p ng-if="!$ctrl.recent.length" class="bjl-muted">None yet. Finish a lap of a race that's on the site.</p>
             <table class="bjl-table" ng-if="$ctrl.recent.length">
-                <tr ng-repeat="r in $ctrl.recent track by r.at">
+                <tr ng-repeat="r in $ctrl.recent track by $index">
                     <td class="bjl-truncate" style="max-width: 9rem">{{r.name}}</td>
                     <td class="num">{{$ctrl.lib.formatLap(r.lapMs)}}</td>
                     <td class="bjl-small" ng-if="r.status === 'posted'">
                         P{{r.rank}}/{{r.drivers}}<span ng-if="r.isRecord"> · record</span><span ng-if="r.isPB && !r.isRecord"> · PB</span>
                     </td>
                     <td class="bjl-small bjl-muted" ng-if="r.status === 'unlisted'">Not on the site</td>
+                    <td class="bjl-small bjl-muted" ng-if="r.status === 'duplicate'">Already posted</td>
+                    <td class="bjl-small bjl-muted" ng-if="r.status === 'withdrawn'">Withdrawn</td>
                     <td class="bjl-small bjl-error" ng-if="r.status === 'failed'" title="{{r.error}}">Not posted</td>
                 </tr>
             </table>

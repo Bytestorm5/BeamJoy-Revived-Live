@@ -37,6 +37,12 @@ local function selfActivity()
             local laps = session.settings and tonumber(session.settings.laps)
             local lap = tonumber(p.currentLap) or 1
             local name = race and race.name or "a race"
+            -- an event in phases (BeamJoy's race phases) : which one, "Qualifying"
+            local phases = type(session.phases) == "table" and session.phases or {}
+            local phase = #phases > 1 and phases[tonumber(session.phaseIndex) or 1] or nil
+            if type(phase) == "table" and type(phase.name) == "string" and phase.name ~= "" then
+                name = name .. " · " .. phase.name
+            end
             if p.finished then return "Finished " .. name end
             return laps and laps > 1 and string.format("Racing %s · lap %d/%d", name, math.min(lap, laps), laps)
                 or ("Racing " .. name)

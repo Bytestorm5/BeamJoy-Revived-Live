@@ -146,12 +146,21 @@ end
 -- Wire format, both ways : one header event, then the body in parts (BeamMP events are kept under
 -- 20 KB each). Every event's text is escaped so it never holds a capital Z : the BeamMP launcher
 -- drops a player on any packet over 500 bytes containing "Zp".
+--
+-- Pacing, both ways. BeamMP's server writes to a player's connection from more than one thread,
+-- and a burst that fills it can garble a packet and crash that player's launcher (BeamJoy paces
+-- its own sends for this, communications/tx.lua). Answers wait per player and leave at
+-- REPLY_BUDGET bytes per poll ; the game paces what it sends here the same way (its main.lua).
 
 --- bytes of body per event, before JSON and escaping grow it
 local CHUNK = 12000
 local MAX_BODY = 40 * 1024 * 1024
 local MAX_INFLIGHT_PER_PLAYER = 8
 local REQUEST_TIMEOUT_S = 150
+--- bytes sent to one player per poll (200 ms) : 80 KB/s, well under what BeamJoy's own flow
+--- control leaves room for ; an answer this small or smaller goes straight out when none waits
+local REPLY_BUDGET = 16000
+local REPLY_SMALL = 4000
 
 local TMP_DIR = PLUGIN_DIR .. "tmp/"
 --- id -> request being received (header seen, parts arriving)
@@ -160,6 +169,8 @@ local incoming = {}
 local running = {}
 local seq = 0
 local curlOk = nil
+--- playerID -> {event, data}[] waiting to be sent, oldest first
+local outbox = {}
 
 local function isWindows()
     return package.config:sub(1, 1) == "\\"
@@ -215,15 +226,40 @@ local function split(text, size)
     return parts
 end
 
+--- sends up to REPLY_BUDGET bytes of what waits for each player (always one event at least)
+local function drainReplies()
+    for playerID, q in pairs(outbox) do
+        if not MP.IsPlayerConnected(playerID) then
+            outbox[playerID] = nil
+        else
+            local sent = 0
+            while #q > 0 and (sent == 0 or sent + #q[1][2] <= REPLY_BUDGET) do
+                local ev = table.remove(q, 1)
+                MP.TriggerClientEvent(playerID, ev[1], ev[2])
+                sent = sent + #ev[2]
+            end
+            if #q == 0 then outbox[playerID] = nil end
+        end
+    end
+end
+
 --- sends a result to a player's game, in parts
 local function reply(playerID, id, status, body)
     if not MP.IsPlayerConnected(playerID) then return end
     local parts = split(body or "", CHUNK)
-    MP.TriggerClientEvent(playerID, "BJLHttpResult",
-        escapeWire(Util.JsonEncode({ id = id, status = status, parts = #parts })))
+    local events = { { "BJLHttpResult", escapeWire(Util.JsonEncode({ id = id, status = status, parts = #parts })) } }
+    local size = #events[1][2]
     for i, part in ipairs(parts) do
-        MP.TriggerClientEvent(playerID, "BJLHttpPart", escapeWire(Util.JsonEncode({ id = id, part = i, data = part })))
+        events[#events + 1] = { "BJLHttpPart", escapeWire(Util.JsonEncode({ id = id, part = i, data = part })) }
+        size = size + #events[#events][2]
     end
+    if not outbox[playerID] and size <= REPLY_SMALL then
+        for _, ev in ipairs(events) do MP.TriggerClientEvent(playerID, ev[1], ev[2]) end
+        return
+    end
+    local q = outbox[playerID] or {}
+    for _, ev in ipairs(events) do q[#q + 1] = ev end
+    outbox[playerID] = q
 end
 
 local function fail(playerID, id, status, message)
@@ -329,6 +365,7 @@ function BJL_onHttpPart(playerID, data)
 end
 
 function BJL_pollHttp()
+    drainReplies()
     for key, r in pairs(running) do
         local done = readFile(r.base .. ".done")
         if done then
@@ -353,6 +390,7 @@ local function dropPlayerRequests(playerID)
     for key in pairs(incoming) do
         if key:match("@" .. playerID .. "$") then incoming[key] = nil end
     end
+    outbox[playerID] = nil
 end
 
 function BJL_onHello(playerID)

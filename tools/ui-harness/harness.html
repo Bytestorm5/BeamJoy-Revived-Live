@@ -17,6 +17,7 @@
   <div id="fake">
     <button onclick="fake.toggle()">Shift+F4</button>
     <button onclick="fake.lap()">Finish a lap</button>
+    <button onclick="fake.disqualify()">Disqualified</button>
     <button onclick="fake.live()">Live report</button>
   </div>
   <script type="module">
@@ -48,7 +49,7 @@
     const handlers = {
       ready: () => {
         emit("BJLState", state);
-        emit("BJLRaces", [{ id: 1, name: race.name, loopable: !!race.loopable, gates: race.gates.length, props: 0 }]);
+        emit("BJLRaces", [{ id: 1, name: race.name, loopable: !!race.loopable, gates: race.gates.length, props: (race.props || []).length }]);
       },
       saveAccount: (token, user) => {
         state.account = { token, user };
@@ -60,7 +61,8 @@
         localStorage.removeItem("harness.account");
         emit("BJLState", state);
       },
-      requestRace: (id) => emit("BJLRace", { id, race, course: course() }),
+      // BeamJoy sends a race's props when asked (beamjoy_races.getProps) : the race comes a moment later
+      requestRace: (id) => setTimeout(() => emit("BJLRace", { id, race, course: course() }), 400),
       captureScreenshot: () => setTimeout(() => emit("BJLCaptured", { kind: "screenshot", dataUrl: shot }), 300),
       // like capture.lua : a 2 x 2 grid of shots over the race, then "aerial" when done
       captureAerial: (raceId) => {
@@ -101,10 +103,19 @@
         (handlers[event] || (() => {}))(...args);
       },
     };
+    // one grid run (a race session's phase), its laps numbered like laps.lua does
+    const run = `harness-${Date.now()}#1`;
+    let runLap = 0;
     window.fake = {
       toggle: () => emit("BJLToggle", {}),
-      lap: (lapMs = 299000 + Math.round(Math.random() * 20000), sectors) =>
-        emit("BJLLap", { course: course(), lapMs, sectors: sectors ?? null, vehicle: "Hirochi SBR4", playerName: state.selfName, kind: "grid" }),
+      lap: (lapMs = 299000 + Math.round(Math.random() * 20000), sectors) => {
+        runLap++;
+        // a circuit's first lap from the grid is a standing start, the rest flying
+        const start = race.loopable && runLap > 1 ? "flying" : "standing";
+        emit("BJLLap", { course: course(), lapMs, sectors: sectors ?? null, vehicle: "Hirochi SBR4", playerName: state.selfName,
+          start, run, runLap, kind: "grid" });
+      },
+      disqualify: () => emit("BJLWithdraw", { course: course(), run }),
       live: () => emit("BJLLiveReport", {
         serverKey: "srv_harness_key_0123456789", serverName: state.config.serverName, level: state.level, mapName: state.levelTitle,
         players: [{ name: "HarnessDriver", vehicle: "Hirochi SBR4", pos: [race.gates[0].pos.x, race.gates[0].pos.y, 0], heading: 45, speed: 30, activity: "", spectating: false }],
